@@ -1,0 +1,27 @@
+{
+  "name": "sut-court-queue",
+  "version": "1.0.0",
+  "description": "Basketball court queue management system for SUT",
+  "scripts": {
+    "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
+    "dev:server": "cd server && npm run dev",
+    "dev:client": "cd client && npm run dev",
+    "build": "npm run build:server && npm run build:client",
+    "build:server": "cd server && npm run build",
+    "build:client": "cd client && npm run build",
+    "build:prod": "NODE_ENV=production npm run build",
+    "start": "cd server && npm start",
+    "start:prod": "cd server && npm run start:prod",
+    "install:all": "npm install && cd server && npm install && cd ../client && npm install",
+    "test": "cd server && npm test",
+    "test:all": "npm run test && cd client && npm run test:run",
+    "deploy:build": "npm run install:all && npm run build:prod",
+    "health-check": "cd server && npm run health-check"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
+  },
+  "keywords": ["basketball", "queue", "court", "management", "sut"],
+  "author": "SUT Development Team",
+  "license": "MIT"
+}
