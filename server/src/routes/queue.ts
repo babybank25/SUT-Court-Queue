@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { teamRepository, queueStateRepository } from '../database';
+import { database, teamRepository, queueStateRepository } from '../database';
 import { validateBody, asyncHandler, AppError } from '../middleware';
 import { JoinQueueInputSchema } from '../types/validation';
 import { emitQueueUpdate } from '../services/socketService';
@@ -35,29 +35,50 @@ router.post('/join',
       throw new AppError('Team name already exists', 400, 'TEAM_NAME_EXISTS');
     }
     
-    // Get current queue state
-    const queueState = await queueStateRepository.get();
-    
-    // Check if queue is full
-    if (queueState.teams.length >= queueState.maxSize) {
-      throw new AppError('Queue is full', 400, 'QUEUE_FULL');
+    const MAX_RETRIES = 5;
+    let newTeam;
+    let nextPosition = 0;
+
+    for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
+      try {
+        await database.transaction(async () => {
+          // Get current queue state inside the transaction
+          const queueState = await queueStateRepository.get();
+
+          // Check if queue is full
+          if (queueState.teams.length >= queueState.maxSize) {
+            throw new AppError('Queue is full', 400, 'QUEUE_FULL');
+          }
+
+          // Calculate next position
+          nextPosition = queueState.teams.length > 0
+            ? Math.max(...queueState.teams.map(t => t.position || 0)) + 1
+            : 1;
+
+          // Create new team
+          newTeam = await teamRepository.create({
+            name,
+            members,
+            contactInfo,
+            status: 'waiting',
+            wins: 0,
+            position: nextPosition
+          });
+        });
+        break;
+      } catch (err: any) {
+        if (err instanceof AppError) throw err;
+        if (err?.message?.includes('UNIQUE constraint failed: teams.position') && attempt < MAX_RETRIES - 1) {
+          continue; // Retry on position conflict
+        }
+        throw err;
+      }
     }
-    
-    // Calculate next position
-    const nextPosition = queueState.teams.length > 0 
-      ? Math.max(...queueState.teams.map(t => t.position || 0)) + 1 
-      : 1;
-    
-    // Create new team
-    const newTeam = await teamRepository.create({
-      name,
-      members,
-      contactInfo,
-      status: 'waiting',
-      wins: 0,
-      position: nextPosition
-    });
-    
+
+    if (!newTeam) {
+      throw new AppError('Failed to join queue', 500, 'QUEUE_JOIN_FAILED');
+    }
+
     // Emit queue update to all connected clients
     const updatedQueueState = await queueStateRepository.get();
     emitQueueUpdate({
