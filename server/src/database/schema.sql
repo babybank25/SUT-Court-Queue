@@ -10,7 +10,7 @@ CREATE TABLE IF NOT EXISTS teams (
     status TEXT NOT NULL CHECK (status IN ('waiting', 'playing', 'cooldown')) DEFAULT 'waiting',
     wins INTEGER NOT NULL DEFAULT 0 CHECK (wins >= 0),
     last_seen DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    position INTEGER,
+    position INTEGER UNIQUE,
     created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
 );
