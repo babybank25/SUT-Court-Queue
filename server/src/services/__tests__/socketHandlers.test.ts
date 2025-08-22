@@ -1,4 +1,5 @@
 import { Socket } from 'socket.io';
+import jwt from 'jsonwebtoken';
 import {
   handleJoinQueue,
   handleConfirmResult,
@@ -331,10 +332,21 @@ describe('Socket Handlers', () => {
   });
 
   describe('handleAdminAction', () => {
+    const secret = process.env.JWT_SECRET || 'fallback-secret';
+    const adminToken = jwt.sign(
+      { id: 'admin-1', username: 'admin', isAdmin: true },
+      secret
+    );
+    const userToken = jwt.sign(
+      { id: 'user-1', username: 'user', isAdmin: false },
+      secret
+    );
+
     const validAdminData = {
       action: 'start_match',
       payload: { team1Id: '1', team2Id: '2' },
-      adminId: 'admin-1'
+      adminId: 'admin-1',
+      token: adminToken
     };
 
     it('should handle valid admin action', async () => {
@@ -347,12 +359,12 @@ describe('Socket Handlers', () => {
     it('should reject invalid data', async () => {
       const invalidData = { action: '', payload: null };
 
-      await handleAdminAction(mockSocket as Socket, invalidData);
+      await handleAdminAction(mockSocket as Socket, invalidData as any);
 
       expect(mockEmitError).toHaveBeenCalledWith(mockSocket, {
         code: 'VALIDATION_ERROR',
         message: 'Invalid admin action data',
-        details: { required: ['action', 'adminId'] }
+        details: { required: ['action', 'adminId', 'token'] }
       });
     });
 
@@ -360,7 +372,8 @@ describe('Socket Handlers', () => {
       const unknownActionData = {
         action: 'unknown_action',
         payload: {},
-        adminId: 'admin-1'
+        adminId: 'admin-1',
+        token: adminToken
       };
 
       await handleAdminAction(mockSocket as Socket, unknownActionData);
@@ -368,20 +381,47 @@ describe('Socket Handlers', () => {
       expect(mockEmitError).toHaveBeenCalledWith(mockSocket, {
         code: 'UNKNOWN_ACTION',
         message: 'Unknown admin action: unknown_action',
-        details: { 
-          action: 'unknown_action', 
-          availableActions: ['start_match', 'force_resolve_match', 'update_queue_order', 'remove_team'] 
+        details: {
+          action: 'unknown_action',
+          availableActions: ['start_match', 'force_resolve_match', 'update_queue_order', 'remove_team']
         }
+      });
+    });
+
+    it('should reject when token lacks admin privileges', async () => {
+      const data = {
+        action: 'start_match',
+        payload: {},
+        adminId: 'user-1',
+        token: userToken
+      };
+
+      await handleAdminAction(mockSocket as Socket, data);
+
+      expect(mockEmitError).toHaveBeenCalledWith(mockSocket, {
+        code: 'ADMIN_REQUIRED',
+        message: 'Admin privileges required'
+      });
+    });
+
+    it('should reject invalid token', async () => {
+      const data = { ...validAdminData, token: 'invalid-token' };
+
+      await handleAdminAction(mockSocket as Socket, data);
+
+      expect(mockEmitError).toHaveBeenCalledWith(mockSocket, {
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired token'
       });
     });
 
     it('should handle database errors', async () => {
       // Mock an error in one of the admin action handlers
       jest.spyOn(console, 'log').mockImplementation(() => {});
-      
+
       // Simulate an error by making the action handler throw
       const errorData = { ...validAdminData, action: 'start_match' };
-      
+
       await handleAdminAction(mockSocket as Socket, errorData);
 
       // The handler should complete without throwing
