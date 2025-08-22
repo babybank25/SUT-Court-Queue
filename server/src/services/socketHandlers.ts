@@ -1,13 +1,14 @@
 import { Socket } from 'socket.io';
+import jwt from 'jsonwebtoken';
 import { teamRepository, matchRepository, queueStateRepository } from '../database';
-import { 
-  emitQueueUpdate, 
-  emitMatchUpdate, 
-  emitNotification, 
+import {
+  emitQueueUpdate,
+  emitMatchUpdate,
+  emitNotification,
   emitError,
   joinRoom,
   leaveRoom,
-  ROOMS 
+  ROOMS
 } from './socketService';
 import { JoinQueueInputSchema, ConfirmMatchInputSchema } from '../types/validation';
 import { SocketErrorData, NotificationData } from '../types';
@@ -267,20 +268,39 @@ export const handleAdminAction = async (socket: Socket, data: any) => {
     console.log(`Socket ${socket.id} attempting admin action:`, data);
     
     // Basic validation for admin actions
-    if (!data || typeof data.action !== 'string' || !data.adminId) {
+    if (!data || typeof data.action !== 'string' || !data.adminId || !data.token) {
       const error: SocketErrorData = {
         code: 'VALIDATION_ERROR',
         message: 'Invalid admin action data',
-        details: { required: ['action', 'adminId'] }
+        details: { required: ['action', 'adminId', 'token'] }
       };
       emitError(socket, error);
       return;
     }
-    
-    const { action, payload, adminId } = data;
-    
-    // TODO: Add proper admin authentication check here
-    // For now, we'll just log the action
+
+    const { action, payload, adminId, token } = data;
+
+    // Verify admin token using authenticateToken logic
+    try {
+      const user = jwt.verify(token, process.env.JWT_SECRET || 'fallback-secret') as any;
+      if (!user || !user.isAdmin) {
+        const error: SocketErrorData = {
+          code: 'ADMIN_REQUIRED',
+          message: 'Admin privileges required'
+        };
+        emitError(socket, error);
+        return;
+      }
+    } catch (err) {
+      const error: SocketErrorData = {
+        code: 'INVALID_TOKEN',
+        message: 'Invalid or expired token'
+      };
+      emitError(socket, error);
+      return;
+    }
+
+    // Token verified - proceed with admin action
     
     switch (action) {
       case 'start_match':
