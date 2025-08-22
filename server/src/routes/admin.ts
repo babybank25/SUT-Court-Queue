@@ -159,18 +159,25 @@ router.post('/match/start',
       teamRepository.update(team1Id, { status: 'playing' }),
       teamRepository.update(team2Id, { status: 'playing' })
     ]);
-    
+
+    // Reassign positions of remaining teams in queue
+    const remainingTeams = await teamRepository.getQueuedTeams();
+    const positionUpdates = remainingTeams.map((team, index) => ({
+      id: team.id,
+      position: index + 1
+    }));
+    await teamRepository.updatePositions(positionUpdates);
+
     // Update queue state with current match
-    await queueStateRepository.update({ currentMatch: newMatch });
-    
+    const updatedQueueState = await queueStateRepository.update({ currentMatch: newMatch });
+
     // Emit updates
     emitMatchUpdate({
       match: newMatch,
       event: 'match_started',
       teams: `${team1.name} vs ${team2.name}`
     });
-    
-    const updatedQueueState = await queueStateRepository.get();
+
     emitQueueUpdate({
       teams: updatedQueueState.teams,
       totalTeams: updatedQueueState.teams.length,
