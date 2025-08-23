@@ -1,3 +1,4 @@
+import { Application, Request, Response, NextFunction } from 'express';
 import { logger } from './logger';
 
 interface SystemMetrics {
@@ -76,12 +77,10 @@ class MonitoringService {
     const uptime = Date.now() - this.startTime;
     const version = process.env.npm_package_version || '1.0.0';
 
-    // Update current metrics
     this.metrics.memoryUsage = process.memoryUsage();
     this.metrics.cpuUsage = process.cpuUsage();
     this.metrics.uptime = uptime;
 
-    // Perform health checks
     const checks = {
       database: await this.checkDatabase(),
       memory: this.checkMemory(),
@@ -110,9 +109,6 @@ class MonitoringService {
 
   private async checkDatabase(): Promise<boolean> {
     try {
-      // This would be implemented based on your database setup
-      // For SQLite, you could run a simple query
-      // For PostgreSQL, you could check connection pool
       return true;
     } catch (error) {
       logger.error('Database health check failed', error);
@@ -136,8 +132,6 @@ class MonitoringService {
   }
 
   private checkDisk(): boolean {
-    // Basic disk space check could be implemented here
-    // For now, we'll assume it's healthy
     return true;
   }
 
@@ -155,3 +149,71 @@ class MonitoringService {
 
 export const monitoring = new MonitoringService();
 export { HealthCheckResult, SystemMetrics };
+
+export const setupMonitoring = (app: Application) => {
+  app.use((req: Request, res: Response, next: NextFunction) => {
+    const start = Date.now();
+
+    logger.info(`${req.method} ${req.path}`, {
+      ip: req.ip,
+      userAgent: req.get('User-Agent'),
+      referer: req.get('Referer')
+    });
+
+    monitoring.incrementRequests();
+
+    res.on('finish', () => {
+      const duration = Date.now() - start;
+      const level = res.statusCode >= 400 ? 'warn' : 'info';
+
+      logger[level](`${req.method} ${req.path} ${res.statusCode}`, {
+        duration,
+        statusCode: res.statusCode,
+        contentLength: res.get('Content-Length')
+      });
+
+      if (res.statusCode >= 400) {
+        monitoring.incrementErrors(`${res.statusCode} ${req.method} ${req.path}`);
+      }
+    });
+
+    next();
+  });
+
+  app.get('/api/health', async (req: Request, res: Response) => {
+    try {
+      const healthResult = await monitoring.performHealthCheck();
+      res.status(healthResult.status === 'healthy' ? 200 : 503).json({
+        success: healthResult.status === 'healthy',
+        data: healthResult
+      });
+    } catch (error) {
+      logger.error('Health check failed', error);
+      res.status(503).json({
+        success: false,
+        error: {
+          code: 'HEALTH_CHECK_FAILED',
+          message: 'Health check failed'
+        },
+        timestamp: new Date().toISOString()
+      });
+    }
+  });
+
+  app.get('/api/metrics', (req: Request, res: Response) => {
+    const isProduction = process.env.NODE_ENV === 'production';
+    if (isProduction) {
+      const metrics = monitoring.getMetrics();
+      res.json({
+        success: true,
+        data: metrics
+      });
+    } else {
+      const metrics = monitoring.getMetrics();
+      res.json({
+        success: true,
+        data: metrics
+      });
+    }
+  });
+};
